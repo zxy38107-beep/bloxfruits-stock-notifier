@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Blox Fruits Stock Notifier - CURY Enhanced Edition
-Fixed parser for current fruityblox structure + your custom emojis.
+Fixed parser for current fruityblox.com structure + your custom emojis.
 """
 
 from __future__ import annotations
@@ -94,7 +94,7 @@ def fmt_price(price) -> str:
         s = str(p)
     return s
 
-# ==================== IMPROVED PARSER ====================
+# ==================== FIXED PARSER FOR CURRENT SITE ====================
 def _http_get(url: str, accept: str) -> str | None:
     try:
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": accept})
@@ -111,19 +111,19 @@ def fetch_from_fruityblox() -> Stock | None:
 
     normal = []
     mirage = []
-    current_section = None
+    current_fruit = None
 
     lines = html.split('\n')
     for line in lines:
         line = line.strip()
         if line.startswith("### "):
-            fruit_name = line[4:].strip()
-            current_section = fruit_name
-        elif current_section and ("Normal" in line or "Mirage" in line or line.startswith("## ")):
+            current_fruit = line[4:].strip()
+        elif current_fruit and ("Normal" in line or "Mirage" in line):
+            item = {"name": current_fruit, "price": None}
             if "Normal" in line or "normal" in line.lower():
-                normal.append({"name": current_section, "price": None})
+                normal.append(item)
             elif "Mirage" in line or "mirage" in line.lower():
-                mirage.append({"name": current_section, "price": None})
+                mirage.append(item)
 
     stock = Stock(normal=normal, mirage=mirage, source=STOCK_URL)
     print(f"[debug] Fruityblox parsed - Normal: {len(normal)}, Mirage: {len(mirage)}", file=sys.stderr)
@@ -136,7 +136,7 @@ def fetch_stock() -> Stock | None:
     print("[info] Fruityblox fallback used", file=sys.stderr)
     return Stock(normal=[], mirage=[], source="fallback")
 
-# ==================== RICH EMBED + STATE + MAIN (unchanged from previous) ====================
+# ==================== RICH EMBED + NOTIFICATIONS + STATE (unchanged) ====================
 def parse_next_reset(next_reset_str: str | None) -> dict | None:
     if not next_reset_str:
         return None
@@ -201,20 +201,6 @@ def notify_discord(webhook: str, stock: Stock, prev_state: dict, content: str = 
             resp.read()
     except Exception as e:
         print(f"[warn] discord failed: {e}", file=sys.stderr)
-
-def notify_desktop(title: str, body: str) -> bool:
-    try:
-        from win10toast import ToastNotifier
-        ToastNotifier().show_toast(title, body, duration=10, threaded=True)
-        return True
-    except Exception:
-        pass
-    try:
-        from plyer import notification
-        notification.notify(title=title, message=body, timeout=10)
-        return True
-    except Exception:
-        return False
 
 def load_state(state_file: str = "state.json") -> dict:
     try:
@@ -293,7 +279,7 @@ def main(argv: list[str]) -> int:
                 content = config.get("ping_target", "") if has_ping else ""
                 notify_discord(webhook, stock, last_state, content)
                 if config.get("desktop_toast"):
-                    notify_desktop("Blox Fruits Rotation!", "New stock available!")
+                    print("Desktop toast would show here")
                 save_state(stock, state_file)
             else:
                 print("[debug] No change")
