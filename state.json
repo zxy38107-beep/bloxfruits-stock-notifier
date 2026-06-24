@@ -1,14 +1,14 @@
 {
-  "last_signature": "blade|bomb|dark|ghost|ice|rocket|smoke|spin",
+  "last_signature": "blade|dough|flame|ice|light|rocket|smoke|spin",
   "last_present": [
     "blade",
-    "bomb",
-    "dark",
-    "ghost",
+    "dough",
+    "flame",
     "ice",
+    "light",
     "rocket",
     "smoke",
     "spin"
   ],
-  "last_checked": "2026-06-24T21:50:58.919107+00:00"
+  "last_checked": "2026-06-24T23:13:45.773391+00:00"
 }
