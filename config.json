@@ -1,0 +1,19 @@
+{
+  "watchlist": [
+    "Dragon",
+    "Leopard",
+    "Kitsune",
+    "Dough",
+    "Mammoth",
+    "Gas"
+  ],
+  "poll_seconds": 300,
+  "discord_webhook": "",
+  "desktop_toast": true,
+  "state_file": "state.json",
+  "ping_fruits": [
+    "Kitsune",
+    "Dragon"
+  ],
+  "ping_target": "@everyone"
+}
