@@ -1,0 +1,7 @@
+# Local-only scratch / generated files (the GitHub Action commits state.json,
+# so it is NOT ignored — it must be tracked to persist dedup across runs).
+__pycache__/
+*.pyc
+_*.json
+_*.html
+config.local.json
