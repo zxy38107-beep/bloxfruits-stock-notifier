@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Blox Fruits Stock Notifier - CURY Enhanced Edition
-Your custom emojis + fixed parsing + robust detection.
+Fixed parser for current fruityblox structure + your custom emojis.
 """
 
 from __future__ import annotations
@@ -24,16 +24,12 @@ STOCK_URL = "https://fruityblox.com/stock"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 HTTP_TIMEOUT = 20
 
-ALWAYS_IN_STOCK = {"rocket", "spin"}
-
 FRUIT_EMOJI = {
     "buddha": "<:buddha:1519382662144331879>",
     "control": "<:control:1519382870974791821>",
     "creation": "<:creation:1519382083552940185>",
     "dough": "<:dough:1519382250406281338>",
     "dragon": "<:dragon_fruit_east:1519382172060876850>",
-    "dragon east": "<:dragon_fruit_east:1519382172060876850>",
-    "dragon west": "<:dragon_fruit_west:1519382526509191349>",
     "gravity": "<:gravity:1519382019413512242>",
     "kitsune": "<:kitsune:1519382598432854047>",
     "leopard": "<:leopard:1519382733975977985>",
@@ -45,16 +41,10 @@ FRUIT_EMOJI = {
     "spring": "🌀",
     "bomb": "💣",
     "smoke": "💨",
-    "spike": "🌵",
     "flame": "🔥",
     "ice": "❄️",
-    "sand": "🏜️",
-    "dark": "🌑",
-    "eagle": "🦅",
-    "diamond": "💎",
     "light": "⚡",
-    "rubber": "🟡",
-    "ghost": "👻",
+    "dark": "🌑",
     "magma": "🌋",
     "quake": "🌋",
     "love": "❤️",
@@ -62,8 +52,6 @@ FRUIT_EMOJI = {
     "sound": "🔊",
     "phoenix": "🔥",
     "lightning": "🌩️",
-    "pain": "😣",
-    "blizzard": "❄️",
     "mammoth": "🐘",
     "t-rex": "🦖",
     "tiger": "🐅",
@@ -106,7 +94,7 @@ def fmt_price(price) -> str:
         s = str(p)
     return s
 
-# ==================== FETCHING ====================
+# ==================== IMPROVED PARSER ====================
 def _http_get(url: str, accept: str) -> str | None:
     try:
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": accept})
@@ -120,18 +108,23 @@ def fetch_from_fruityblox() -> Stock | None:
     html = _http_get(STOCK_URL, "text/html")
     if not html:
         return None
-    # Improved extraction
+
     normal = []
     mirage = []
-    # Simple line-based parsing for current site structure
+    current_section = None
+
     lines = html.split('\n')
     for line in lines:
         line = line.strip()
-        if line and not line.startswith('<') and len(line) > 3:
+        if line.startswith("### "):
+            fruit_name = line[4:].strip()
+            current_section = fruit_name
+        elif current_section and ("Normal" in line or "Mirage" in line or line.startswith("## ")):
             if "Normal" in line or "normal" in line.lower():
-                normal.append({"name": line, "price": None})
+                normal.append({"name": current_section, "price": None})
             elif "Mirage" in line or "mirage" in line.lower():
-                mirage.append({"name": line, "price": None})
+                mirage.append({"name": current_section, "price": None})
+
     stock = Stock(normal=normal, mirage=mirage, source=STOCK_URL)
     print(f"[debug] Fruityblox parsed - Normal: {len(normal)}, Mirage: {len(mirage)}", file=sys.stderr)
     return stock if normal or mirage else None
@@ -143,7 +136,7 @@ def fetch_stock() -> Stock | None:
     print("[info] Fruityblox fallback used", file=sys.stderr)
     return Stock(normal=[], mirage=[], source="fallback")
 
-# ==================== RICH EMBED ====================
+# ==================== RICH EMBED + STATE + MAIN (unchanged from previous) ====================
 def parse_next_reset(next_reset_str: str | None) -> dict | None:
     if not next_reset_str:
         return None
@@ -196,12 +189,8 @@ def build_embed(stock: Stock, prev_state: dict) -> dict:
         embed["fields"].append({"name": "⏳ Next Reset", "value": f"**{countdown['text']}**", "inline": False})
     return embed
 
-# ==================== NOTIFICATIONS ====================
 def notify_discord(webhook: str, stock: Stock, prev_state: dict, content: str = "") -> None:
-    body = {
-        "username": "Blox Fruits Oracle",
-        "embeds": [build_embed(stock, prev_state)],
-    }
+    body = {"username": "Blox Fruits Oracle", "embeds": [build_embed(stock, prev_state)]}
     if content:
         body["content"] = content
         body["allowed_mentions"] = {"parse": ["everyone", "roles", "users"]}
@@ -227,7 +216,6 @@ def notify_desktop(title: str, body: str) -> bool:
     except Exception:
         return False
 
-# ==================== STATE ====================
 def load_state(state_file: str = "state.json") -> dict:
     try:
         with open(state_file) as f:
@@ -255,7 +243,6 @@ def should_notify(new_stock: Stock, last_state: dict) -> bool:
         return True
     return get_stock_signature(new_stock) != last_state.get("last_signature")
 
-# ==================== CONFIG & MAIN (FIXED) ====================
 def load_config(path: str = "config.json") -> dict:
     try:
         with open(path) as f:
