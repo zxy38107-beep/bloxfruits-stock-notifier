@@ -1,0 +1,48 @@
+name: Blox Fruits Stock Check
+
+on:
+  schedule:
+    # Every 10 minutes (GitHub cron minimum is 5 min; schedules are best-effort
+    # and can run several minutes late under load — fine for 2-4h rotations).
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}   # lets you trigger a run manually from the Actions tab
+
+# Allow the job to push the updated state.json back to the repo.
+permissions:
+  contents: write
+
+# Don't let two scheduled runs overlap (they'd race on state.json).
+concurrency:
+  group: stock-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run stock check
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          PING_TARGET: ${{ secrets.PING_TARGET }}
+        run: python stock_notifier.py --once
+
+      - name: Commit updated state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Only commit if state.json actually changed (i.e. stock rotated).
+          if ! git diff --quiet -- state.json; then
+            git add state.json
+            git commit -m "chore: update stock state [skip ci]"
+            git push
+          else
+            echo "No stock change; nothing to commit."
+          fi
