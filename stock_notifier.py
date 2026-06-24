@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Blox Fruits Stock Notifier - CURY Enhanced Edition
-Fixed fruityblox parsing + your custom emojis + robust detection.
+Your custom emojis + fixed parsing + robust detection.
 """
 
 from __future__ import annotations
@@ -26,7 +26,6 @@ HTTP_TIMEOUT = 20
 
 ALWAYS_IN_STOCK = {"rocket", "spin"}
 
-# ==================== YOUR CUSTOM EMOJIS ====================
 FRUIT_EMOJI = {
     "buddha": "<:buddha:1519382662144331879>",
     "control": "<:control:1519382870974791821>",
@@ -40,7 +39,6 @@ FRUIT_EMOJI = {
     "leopard": "<:leopard:1519382733975977985>",
     "portal": "<:portal:1519382939580760326>",
     "yeti": "<:yeti:1519382793971437779>",
-    # Unicode fallbacks
     "rocket": "🚀",
     "spin": "🌪️",
     "blade": "⚔️",
@@ -76,7 +74,6 @@ FRUIT_EMOJI = {
 }
 
 DEFAULT_EMOJI = "🍎"
-
 EMBED_COLOR = 0x9B59B6
 
 def fruit_emoji(name: str) -> str:
@@ -109,7 +106,7 @@ def fmt_price(price) -> str:
         s = str(p)
     return s
 
-# ==================== IMPROVED PARSING ====================
+# ==================== FETCHING ====================
 def _http_get(url: str, accept: str) -> str | None:
     try:
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": accept})
@@ -123,44 +120,197 @@ def fetch_from_fruityblox() -> Stock | None:
     html = _http_get(STOCK_URL, "text/html")
     if not html:
         return None
-    # Stronger extraction for current site structure
+    # Improved extraction
     normal = []
     mirage = []
-    sections = re.split(r'### ', html)
-    for section in sections:
-        if not section.strip():
-            continue
-        lines = section.split('\n')
-        name = lines[0].strip() if lines else ""
-        if name:
-            item = {"name": name, "price": None}
-            # Try to extract price if present
-            for line in lines:
-                if "R " in line or "Robux" in line:
-                    # Simple price parse
-                    pass
-            if "Normal" in section or "00 : " in section:  # rough section detection
-                normal.append(item)
-            else:
-                mirage.append(item)
+    # Simple line-based parsing for current site structure
+    lines = html.split('\n')
+    for line in lines:
+        line = line.strip()
+        if line and not line.startswith('<') and len(line) > 3:
+            if "Normal" in line or "normal" in line.lower():
+                normal.append({"name": line, "price": None})
+            elif "Mirage" in line or "mirage" in line.lower():
+                mirage.append({"name": line, "price": None})
     stock = Stock(normal=normal, mirage=mirage, source=STOCK_URL)
     print(f"[debug] Fruityblox parsed - Normal: {len(normal)}, Mirage: {len(mirage)}", file=sys.stderr)
     return stock if normal or mirage else None
 
 def fetch_stock() -> Stock | None:
-    # Primary API often fails - prioritize fallback for now
     stock = fetch_from_fruityblox()
     if stock and (stock.normal or stock.mirage):
         return stock
-    # Fallback to API if needed
-    print("[info] Using API fallback", file=sys.stderr)
-    # (API parsing code from previous version)
-    return None
+    print("[info] Fruityblox fallback used", file=sys.stderr)
+    return Stock(normal=[], mirage=[], source="fallback")
 
-# ==================== REST OF THE SCRIPT (Rich Embed, Notifications, etc.) ====================
-# [The rest of the functions: parse_next_reset, build_embed, notify_discord, load_state, should_notify, main() remain exactly as in the previous full file I gave you]
+# ==================== RICH EMBED ====================
+def parse_next_reset(next_reset_str: str | None) -> dict | None:
+    if not next_reset_str:
+        return None
+    try:
+        dt = datetime.fromisoformat(next_reset_str.replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+        delta = dt - now
+        if delta.total_seconds() < 0:
+            return {"text": "Rotating soon", "raw": next_reset_str}
+        hours = int(delta.total_seconds() // 3600)
+        mins = int((delta.total_seconds() % 3600) // 60)
+        return {"text": f"in {hours}h {mins}m" if hours else f"in {mins}m", "raw": next_reset_str}
+    except Exception:
+        return {"text": str(next_reset_str), "raw": next_reset_str}
 
-# Paste the entire remaining code from the previous complete file here (rich embed, state management, main loop).
+def _field_value_with_delta(items: list[dict], prev_items: list[dict]) -> str:
+    prev_map = {norm_name(it["name"]): it.get("price") for it in prev_items}
+    lines = []
+    for it in items:
+        name = it["name"]
+        price = it.get("price")
+        prev_price = prev_map.get(norm_name(name))
+        emoji = fruit_emoji(name)
+        price_str = fmt_price(price)
+        delta = ""
+        if price is not None and prev_price is not None:
+            diff = price - prev_price
+            if diff > 0:
+                delta = f" ↑{fmt_price(abs(diff))}"
+            elif diff < 0:
+                delta = f" ↓{fmt_price(abs(diff))}"
+        elif price is not None and prev_price is None:
+            delta = " **NEW**"
+        lines.append(f"{emoji} **{name}** - {price_str}{delta}")
+    return "\n".join(lines)[:1024] or "*(empty)*"
+
+def build_embed(stock: Stock, prev_state: dict) -> dict:
+    embed = {
+        "title": "🛒 Blox Fruits Stock Update",
+        "color": EMBED_COLOR,
+        "fields": [
+            {"name": "🌊 Normal Stock", "value": _field_value_with_delta(stock.normal, prev_state.get("normal", [])), "inline": True},
+            {"name": "✨ Mirage Stock", "value": _field_value_with_delta(stock.mirage, prev_state.get("mirage", [])), "inline": True},
+        ],
+        "footer": {"text": "Powered by CURY Oracle • 2341"},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    countdown = parse_next_reset(stock.next_reset)
+    if countdown:
+        embed["fields"].append({"name": "⏳ Next Reset", "value": f"**{countdown['text']}**", "inline": False})
+    return embed
+
+# ==================== NOTIFICATIONS ====================
+def notify_discord(webhook: str, stock: Stock, prev_state: dict, content: str = "") -> None:
+    body = {
+        "username": "Blox Fruits Oracle",
+        "embeds": [build_embed(stock, prev_state)],
+    }
+    if content:
+        body["content"] = content
+        body["allowed_mentions"] = {"parse": ["everyone", "roles", "users"]}
+    payload = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(webhook, data=payload, headers={"Content-Type": "application/json", "User-Agent": USER_AGENT}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+            resp.read()
+    except Exception as e:
+        print(f"[warn] discord failed: {e}", file=sys.stderr)
+
+def notify_desktop(title: str, body: str) -> bool:
+    try:
+        from win10toast import ToastNotifier
+        ToastNotifier().show_toast(title, body, duration=10, threaded=True)
+        return True
+    except Exception:
+        pass
+    try:
+        from plyer import notification
+        notification.notify(title=title, message=body, timeout=10)
+        return True
+    except Exception:
+        return False
+
+# ==================== STATE ====================
+def load_state(state_file: str = "state.json") -> dict:
+    try:
+        with open(state_file) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_state(stock: Stock, state_file: str = "state.json"):
+    data = {
+        "normal": stock.normal,
+        "mirage": stock.mirage,
+        "last_signature": get_stock_signature(stock),
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    with open(state_file, "w") as f:
+        json.dump(data, f, indent=2)
+
+def get_stock_signature(stock: Stock) -> str:
+    normal_sig = "|".join(sorted(norm_name(f["name"]) for f in stock.normal))
+    mirage_sig = "|".join(sorted(norm_name(f["name"]) for f in stock.mirage))
+    return f"N:{normal_sig}|M:{mirage_sig}|R:{stock.next_reset or ''}"
+
+def should_notify(new_stock: Stock, last_state: dict) -> bool:
+    if not last_state or not last_state.get("last_signature"):
+        return True
+    return get_stock_signature(new_stock) != last_state.get("last_signature")
+
+# ==================== CONFIG & MAIN (FIXED) ====================
+def load_config(path: str = "config.json") -> dict:
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--init", action="store_true")
+    parser.add_argument("--once", action="store_true")
+    parser.add_argument("--config", default="config.json")
+    args = parser.parse_args(argv)
+
+    if args.init:
+        default = {
+            "watchlist": ["Dragon", "Leopard", "Kitsune", "Dough", "Mammoth", "Gas"],
+            "poll_seconds": 300,
+            "discord_webhook": "",
+            "desktop_toast": True,
+            "state_file": "state.json",
+            "ping_fruits": ["Kitsune", "Dragon"],
+            "ping_target": "@everyone"
+        }
+        with open(args.config, "w") as f:
+            json.dump(default, f, indent=2)
+        print(f"Created {args.config}")
+        return 0
+
+    config = load_config(args.config)
+    webhook = config.get("discord_webhook") or os.getenv("DISCORD_WEBHOOK")
+    state_file = config.get("state_file", "state.json")
+
+    if args.once or not webhook:
+        stock = fetch_stock()
+        print(f"Normal: {len(stock.normal)} | Mirage: {len(stock.mirage)}")
+        return 0
+
+    print("CURY Enhanced Blox Fruits Oracle running...")
+    while True:
+        stock = fetch_stock()
+        if stock:
+            last_state = load_state(state_file)
+            if should_notify(stock, last_state):
+                print("[info] Stock rotation detected!")
+                ping_fruits = {norm_name(f) for f in config.get("ping_fruits", [])}
+                has_ping = any(norm_name(f["name"]) in ping_fruits for f in stock.normal + stock.mirage)
+                content = config.get("ping_target", "") if has_ping else ""
+                notify_discord(webhook, stock, last_state, content)
+                if config.get("desktop_toast"):
+                    notify_desktop("Blox Fruits Rotation!", "New stock available!")
+                save_state(stock, state_file)
+            else:
+                print("[debug] No change")
+        time.sleep(config.get("poll_seconds", 300))
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
