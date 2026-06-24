@@ -1,16 +1,14 @@
 {
-  "last_signature": "creation|diamond|eagle|flame|ice|magma|quake|rocket|sand|spin",
+  "last_signature": "blade|bomb|dark|ghost|ice|rocket|smoke|spin",
   "last_present": [
-    "creation",
-    "diamond",
-    "eagle",
-    "flame",
+    "blade",
+    "bomb",
+    "dark",
+    "ghost",
     "ice",
-    "magma",
-    "quake",
     "rocket",
-    "sand",
+    "smoke",
     "spin"
   ],
-  "last_checked": "2026-06-24T18:15:55.787821+00:00"
+  "last_checked": "2026-06-24T20:14:50.904125+00:00"
 }
