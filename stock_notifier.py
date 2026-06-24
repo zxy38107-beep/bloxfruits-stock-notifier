@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Blox Fruits Stock Notifier - CURY Stable Healthcheck Edition
-Your custom emojis + original parsing.
+Custom emojis + original reliable parsing.
 """
 
 from __future__ import annotations
@@ -171,10 +171,152 @@ def fetch_from_fruityblox() -> Stock | None:
 def fetch_stock() -> Stock | None:
     return fetch_from_api() or fetch_from_fruityblox()
 
-# ==================== RICH EMBED + NOTIFICATIONS + STATE (as before) ====================
-# (Copy the rich embed, notify_discord, load_state, save_state, should_notify, main() from the previous stable version I gave you)
+# ==================== RICH EMBED + NOTIFICATIONS + STATE ====================
+def parse_next_reset(next_reset_str: str | None) -> dict | None:
+    if not next_reset_str:
+        return None
+    try:
+        dt = datetime.fromisoformat(next_reset_str.replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+        delta = dt - now
+        if delta.total_seconds() < 0:
+            return {"text": "Rotating soon", "raw": next_reset_str}
+        hours = int(delta.total_seconds() // 3600)
+        mins = int((delta.total_seconds() % 3600) // 60)
+        return {"text": f"in {hours}h {mins}m" if hours else f"in {mins}m", "raw": next_reset_str}
+    except Exception:
+        return {"text": str(next_reset_str), "raw": next_reset_str}
 
-# For brevity, paste the remaining code from the full stable version earlier in our conversation.
+def _field_value_with_delta(items: list[dict], prev_items: list[dict]) -> str:
+    prev_map = {norm_name(it["name"]): it.get("price") for it in prev_items}
+    lines = []
+    for it in items:
+        name = it["name"]
+        price = it.get("price")
+        prev_price = prev_map.get(norm_name(name))
+        emoji = fruit_emoji(name)
+        price_str = fmt_price(price)
+        delta = ""
+        if price is not None and prev_price is not None:
+            diff = price - prev_price
+            if diff > 0:
+                delta = f" ↑{fmt_price(abs(diff))}"
+            elif diff < 0:
+                delta = f" ↓{fmt_price(abs(diff))}"
+        elif price is not None and prev_price is None:
+            delta = " **NEW**"
+        lines.append(f"{emoji} **{name}** - {price_str}{delta}")
+    return "\n".join(lines)[:1024] or "*(empty)*"
+
+def build_embed(stock: Stock, prev_state: dict) -> dict:
+    embed = {
+        "title": "🛒 Blox Fruits Stock Update",
+        "color": EMBED_COLOR,
+        "fields": [
+            {"name": "🌊 Normal Stock", "value": _field_value_with_delta(stock.normal, prev_state.get("normal", [])), "inline": True},
+            {"name": "✨ Mirage Stock", "value": _field_value_with_delta(stock.mirage, prev_state.get("mirage", [])), "inline": True},
+        ],
+        "footer": {"text": "Powered by CURY Oracle • 2341"},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    countdown = parse_next_reset(stock.next_reset)
+    if countdown:
+        embed["fields"].append({"name": "⏳ Next Reset", "value": f"**{countdown['text']}**", "inline": False})
+    return embed
+
+def notify_discord(webhook: str, stock: Stock, prev_state: dict, content: str = "") -> None:
+    body = {"username": "Blox Fruits Oracle", "embeds": [build_embed(stock, prev_state)]}
+    if content:
+        body["content"] = content
+        body["allowed_mentions"] = {"parse": ["everyone", "roles", "users"]}
+    payload = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(webhook, data=payload, headers={"Content-Type": "application/json", "User-Agent": USER_AGENT}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+            resp.read()
+    except Exception as e:
+        print(f"[warn] discord failed: {e}", file=sys.stderr)
+
+def load_state(state_file: str = "state.json") -> dict:
+    try:
+        with open(state_file) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_state(stock: Stock, state_file: str = "state.json"):
+    data = {
+        "normal": stock.normal,
+        "mirage": stock.mirage,
+        "last_signature": get_stock_signature(stock),
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    with open(state_file, "w") as f:
+        json.dump(data, f, indent=2)
+
+def get_stock_signature(stock: Stock) -> str:
+    normal_sig = "|".join(sorted(norm_name(f["name"]) for f in stock.normal))
+    mirage_sig = "|".join(sorted(norm_name(f["name"]) for f in stock.mirage))
+    return f"N:{normal_sig}|M:{mirage_sig}|R:{stock.next_reset or ''}"
+
+def should_notify(new_stock: Stock, last_state: dict) -> bool:
+    if not last_state or not last_state.get("last_signature"):
+        return True
+    return get_stock_signature(new_stock) != last_state.get("last_signature")
+
+def load_config(path: str = "config.json") -> dict:
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--init", action="store_true")
+    parser.add_argument("--once", action="store_true")
+    parser.add_argument("--config", default="config.json")
+    args = parser.parse_args(argv)
+
+    if args.init:
+        default = {
+            "watchlist": ["Dragon", "Leopard", "Kitsune", "Dough", "Mammoth", "Gas"],
+            "poll_seconds": 300,
+            "discord_webhook": "",
+            "desktop_toast": True,
+            "state_file": "state.json",
+            "ping_fruits": ["Kitsune", "Dragon"],
+            "ping_target": "@everyone"
+        }
+        with open(args.config, "w") as f:
+            json.dump(default, f, indent=2)
+        print(f"Created {args.config}")
+        return 0
+
+    config = load_config(args.config)
+    webhook = config.get("discord_webhook") or os.getenv("DISCORD_WEBHOOK")
+    state_file = config.get("state_file", "state.json")
+
+    if args.once or not webhook:
+        stock = fetch_stock()
+        print(f"Normal: {len(stock.normal)} | Mirage: {len(stock.mirage)}")
+        return 0
+
+    print("CURY Stable Oracle running with healthchecks...")
+    while True:
+        stock = fetch_stock()
+        if stock:
+            last_state = load_state(state_file)
+            if should_notify(stock, last_state):
+                print("[info] Stock rotation detected!")
+                ping_fruits = {norm_name(f) for f in config.get("ping_fruits", [])}
+                has_ping = any(norm_name(f["name"]) in ping_fruits for f in stock.normal + stock.mirage)
+                content = config.get("ping_target", "") if has_ping else ""
+                notify_discord(webhook, stock, last_state, content)
+                save_state(stock, state_file)
+            else:
+                print("[debug] No change")
+        time.sleep(config.get("poll_seconds", 300))
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
