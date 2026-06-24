@@ -1,0 +1,7 @@
+# The core notifier uses only the Python standard library — no installs needed.
+#
+# Optional, ONLY for Windows desktop toast pop-ups when running locally
+# (not used on GitHub Actions / headless servers). Uncomment if you want them:
+#
+# win10toast
+# plyer
